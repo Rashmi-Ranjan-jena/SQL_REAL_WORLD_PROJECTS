@@ -1,0 +1,92 @@
+select count(*) from olympics_history
+select * from olympics_history_noc_regions
+
+--identify the sport which was played in all summer olympics
+with t1 as 
+	(select count(distinct Games)as total_summer_games from olympics_history
+	where Season='Summer'),
+t2 as
+	(select distinct Sport,Games from olympics_history 
+	where Season='Summer'order by Games),
+t3 as
+	(select Sport,count(Games)as no_of_games from t2 group by Sport)
+	
+select * from t3
+join t1 
+on t1.total_summer_games=t3.no_of_games
+
+--fetch the top 5 athlates who have won he most gold medals
+with t1 as 
+		(select Name,count(1) as total_medals from olympics_history
+		where Medal='Gold'
+		 group by Name
+		 Order by count(1)desc),
+	t2 as 
+		(select * ,dense_rank() over(order by total_medals desc)as rnk
+		from t1)
+select *
+from t2
+where rnk<=5;
+
+
+--List down total gold,silver and bronze medals won by each country
+
+select nr.region as Country,Medal,count(1) as total_medals
+from olympics_history oh
+join olympics_history_noc_regions nr 
+on nr.noc=oh.noc
+where medal<>'NA'
+group by nr.region,Medal;
+
+
+-- <create extension tablefunc;>
+
+select country,
+coalesce(Gold,0)as Gold,
+coalesce(Silver,0)as Silver,
+coalesce(Bronze,0)as Bronze
+from crosstab('select nr.region as Country,Medal,count(1) as total_medals
+				from olympics_history oh
+				join olympics_history_noc_regions nr 
+				on nr.noc=oh.noc
+				where Medal<> ''NA''
+				group by nr.region,Medal
+				order by nr.region,Medal',
+				'values(''Bronze''),(''Gold''),(''Silver'')')
+		as  result  (country varchar,bronze bigint,gold bigint,silver bigint)
+order by gold desc,silver desc,bronze desc
+
+
+--for each olympicgames,which country won the highest gold,silver and bronze medals.
+
+with temp as
+(
+	select substring(Games_Country,1,position('-' in games_country)-1)as games,
+ 	substring(Games_Country,position('-' in games_country)+2)as country,
+	coalesce(Gold,0)as Gold,
+	coalesce(Silver,0)as Silver,
+	coalesce(Bronze,0)as Bronze
+	from crosstab('select concat(Games,'' - '',nr.region) as Games_Country,Medal,count(1) as total_medals
+					from olympics_history oh
+					join olympics_history_noc_regions nr 
+					on nr.noc=oh.noc
+					where Medal<> ''NA''
+					group by Games,nr.region,Medal
+					order by Games,nr.region,Medal',
+					'values(''Bronze''),(''Gold''),(''Silver'')')
+			as  result  (Games_Country varchar,bronze bigint,gold bigint,silver bigint)
+	order by Games_Country
+)
+select distinct games,
+ concat(first_value(country) over(partition by games order by Gold desc)
+	   ,' - ',
+		first_value(Gold) over(partition by games order by Gold desc) as gold_max
+	   )
+  concat(first_value(country) over(partition by games order by Silver desc)
+	   ,' - ',
+		first_value(Silver) over(partition by games order by Silver desc) as silver_max
+	   )
+  concat(first_value(country) over(partition by games order by Bronze desc)
+	   ,' - ',
+		first_value(Bronze) over(partition by games order by Bronze desc)as Bronze
+	   )
